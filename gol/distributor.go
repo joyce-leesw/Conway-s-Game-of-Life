@@ -16,9 +16,9 @@ type distributorChannels struct {
 	inputQ   <-chan uint8
 }
 
-// type cell struct {
-// 	X, Y int
-// }
+ /*type cell struct {
+ 	X, Y int
+ }*/
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
@@ -35,7 +35,7 @@ func distributor(p Params, c distributorChannels) {
 	fileName := fmt.Sprintf("%vx%v", p.ImageWidth, p.ImageHeight)
 
 	//read the game of life and convert the pgm into a slice of slices
-	//initialWorld := readPgmImage(p, fileName
+	//initialWorld := readPgmImage(p, fileName)
 	c.ioCommand <- ioInput
 	c.filename <- fileName
 
@@ -53,9 +53,24 @@ func distributor(p Params, c distributorChannels) {
 
 	// TODO: Execute all turns of the Game of Life.
 	var state State
+
+	sliceOfCh := make([]chan [][]uint8, p.Threads)
+
 	world := initialWorld
 	for turnf := 0; turnf < p.Turns; turnf++ {
-		world = calculateNextState(p, world)
+		
+		// world = calculateNextState(p, world)
+		for i := 0; i < p.Threads; i++ {
+			sliceOfCh[i] = make(chan [][]uint8)
+			go worker(i*p.ImageHeight/p.Threads, (i+1)*p.ImageHeight/p.Threads, world, sliceOfCh[i], p)
+		}
+
+		var newData [][]uint8
+		for i := 0; i < p.Threads; i++ { 
+			slice := <-sliceOfCh[i]
+			newData = append(newData, slice...)
+		}
+
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
@@ -68,7 +83,6 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Send correct Events when required, e.g. CellFlipped, TurnComplete and FinalTurnComplete.
 	//		 See event.go for a list of all events.
 	turn = p.Turns
-
 
 	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
 	c.ioCommand <- ioOutput
@@ -103,6 +117,23 @@ func calculateAliveCells(p Params, world [][]byte) []util.Cell {
 	return aliveCells
 }
 
+func worker(startY, endY int, world [][] byte, sliceOfChi chan<- [][]uint8, p Params) {
+	var worldGo [][] byte
+
+	if startY == 0 {
+		newData := world[p.ImageHeight]
+		worldGo := world[startY: endY + 1]
+		worldGo = append(newData, worldGo...)
+	} else if endY == p.ImageHeight {
+		worldGo := world[startY - 1: endY]
+		worldGo = append(worldGo, worldGo[0])
+	} else {
+		worldGo := world[startY - 1: endY + 1]
+	}  
+
+	filter := calculateNextState(p,worldGo)
+	sliceOfChi <- filter
+}
 func calculateNextState(p Params, world [][]byte) [][]byte {
 
 	var counter, nextX, lastX, nextY, lastY int //can I use a byte here instead
