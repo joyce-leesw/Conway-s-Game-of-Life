@@ -14,7 +14,7 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 	ioCommand := make(chan ioCommand)
 	ioIdle := make(chan bool)
 	//added these 3
-	ioFilename := make(chan string)
+	filename := make(chan string)
 	outputQ := make(chan uint8)
 	inputQ := make(chan uint8)
 
@@ -22,6 +22,7 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		events,
 		ioCommand,
 		ioIdle,
+		filename,
 		outputQ,
 		inputQ,
 	}
@@ -31,7 +32,7 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		command: ioCommand,
 		idle:    ioIdle,
 		//these were nil before
-		filename: ioFilename,
+		filename: filename,
 		output:   outputQ,
 		input:    inputQ,
 	}

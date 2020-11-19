@@ -2,6 +2,8 @@ package gol
 
 import (
 	"fmt"
+
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -9,57 +11,76 @@ type distributorChannels struct {
 	ioCommand chan<- ioCommand
 	ioIdle    <-chan bool
 
-	ioFilename chan<- string
-	outputQ    chan<- uint8
-	inputQ     <-chan uint8
+	filename chan<- string
+	outputQ  chan<- uint8 // this was diffrent before outputQ    chan<- uint8
+	inputQ   <-chan uint8
 }
 
-type cell struct {
-	x, y int
-}
+// type cell struct {
+// 	X, Y int
+// }
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
 	// TODO: Create a 2D slice to store the world.
+	turn := 0
+
 	initialWorld := make([][]byte, p.ImageHeight)
 	for i := 0; i < (p.ImageHeight); i++ {
 		initialWorld[i] = make([]byte, p.ImageWidth)
 	}
 
 	//open the pgm file to game of life
-	fileName := "images/" + fmt.Sprintf("%vx%v.pgm", p.ImageWidth, p.ImageHeight)
+	fileName := fmt.Sprintf("%vx%v", p.ImageWidth, p.ImageHeight)
+
 	//read the game of life and convert the pgm into a slice of slices
-	//initialWorld := readPgmImage(p, fileName)
-
+	//initialWorld := readPgmImage(p, fileName
 	c.ioCommand <- ioInput
-	c.ioFilename <- fileName
+	c.filename <- fileName
 
-	initialWorld := <-inputQ
-
-	// TODO: For all initially alive cells send a CellFlipped Event.
-	aliveCells := make([]cell, 0)
-	turn := 0
-	for y, s := range initialWorld {
-		for x, sl := range s {
-			if sl == 255 {
-				aliveCells = append(aliveCells, cell{x, y})
-				c.events <- CellFlipped{turn}
-			}
+	for i := 0; i < (p.ImageHeight); i++ {
+		for j := 0; j < (p.ImageHeight); j++ {
+			initialWorld[i][j] = <-c.inputQ
 		}
 	}
 
+	// TODO: For all initially alive cells send a CellFlipped Event.
+	//calculateAliveCells(p, initialWorld)
+	for _, cellQ := range calculateAliveCells(p, initialWorld) {
+		c.events <- CellFlipped{0, cellQ}
+	}
+
 	// TODO: Execute all turns of the Game of Life.
+	var state State
 	world := initialWorld
-	for turn := 0; turn < p.Turns; turn++ {
+	for turnf := 0; turnf < p.Turns; turnf++ {
 		world = calculateNextState(p, world)
+
+		for _, cellQ := range calculateAliveCells(p, world) {
+			c.events <- CellFlipped{turnf, cellQ}
+		}
+		c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
+		c.events <- TurnComplete{turnf}
+		c.events <- StateChange{turnf, state}
 	}
 
 	// TODO: Send correct Events when required, e.g. CellFlipped, TurnComplete and FinalTurnComplete.
 	//		 See event.go for a list of all events.
-	cellQueue := make(chan CellFlipped)
-	turnCompleteQueue := make(chan TurnComplete)
-	finalTurnCompleteQueue := make(chan FinalTurnComplete)
+	turn = p.Turns
+
+
+	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
+	c.ioCommand <- ioOutput
+	c.filename <- fileName
+	
+	for i := 0; i < (p.ImageHeight); i++ {
+		for j := 0; j < (p.ImageHeight); j++ {
+			c.outputQ <- world[i][j]
+		}
+	}
+
+	c.events <- ImageOutputComplete{turn, fileName}
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -68,6 +89,18 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{turn, Quitting}
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
+}
+
+func calculateAliveCells(p Params, world [][]byte) []util.Cell {
+	aliveCells := []util.Cell{}
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			if world[y][x] == 255 {
+				aliveCells = append(aliveCells, util.Cell{X: x, Y: y})
+			}
+		}
+	}
+	return aliveCells
 }
 
 func calculateNextState(p Params, world [][]byte) [][]byte {
