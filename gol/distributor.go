@@ -16,9 +16,9 @@ type distributorChannels struct {
 	inputQ   <-chan uint8
 }
 
- /*type cell struct {
- 	X, Y int
- }*/
+/*type cell struct {
+	X, Y int
+}*/
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
@@ -26,9 +26,9 @@ func distributor(p Params, c distributorChannels) {
 	// TODO: Create a 2D slice to store the world.
 	turn := 0
 
-	initialWorld := make([][]byte, p.ImageHeight)
+	initialWorld := make([][]uint8, p.ImageHeight)
 	for i := 0; i < (p.ImageHeight); i++ {
-		initialWorld[i] = make([]byte, p.ImageWidth)
+		initialWorld[i] = make([]uint8, p.ImageWidth)
 	}
 
 	//open the pgm file to game of life
@@ -58,19 +58,37 @@ func distributor(p Params, c distributorChannels) {
 
 	world := initialWorld
 	for turnf := 0; turnf < p.Turns; turnf++ {
-		
+
 		// world = calculateNextState(p, world)
+
+		baseLines := p.ImageHeight / p.Threads
+		slackLines := p.ImageHeight % p.Threads // remainder
+		//var workLines [p.Threads]int
+		workLines := make([]int, p.Threads)
+
+		for i := 0; i < p.Threads; i++ { // create an array with the minimum amount of lines to work on
+			workLines[i] = baseLines
+		}
+
+		for i := 0; i < slackLines; i++ { // adds the remainder to the array
+			workLines[i]++
+		}
+
+		//fmt.Println(workLines)
+
 		for i := 0; i < p.Threads; i++ {
 			sliceOfCh[i] = make(chan [][]uint8)
-			go worker(i*p.ImageHeight/p.Threads, (i+1)*p.ImageHeight/p.Threads, world, sliceOfCh[i], p)
+
+			//go worker(i*p.ImageHeight/p.Threads, (i+1)*p.ImageHeight/p.Threads, world, sliceOfCh[i], p)
+			go worker(workLines, i, world, sliceOfCh[i], p)
 		}
 
 		var newData [][]uint8
-		for i := 0; i < p.Threads; i++ { 
+		for i := 0; i < p.Threads; i++ {
 			slice := <-sliceOfCh[i]
 			newData = append(newData, slice...)
 		}
-
+		//world = newData
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
@@ -87,7 +105,7 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
 	c.ioCommand <- ioOutput
 	c.filename <- fileName
-	
+
 	for i := 0; i < (p.ImageHeight); i++ {
 		for j := 0; j < (p.ImageHeight); j++ {
 			c.outputQ <- world[i][j]
@@ -105,7 +123,7 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func calculateAliveCells(p Params, world [][]byte) []util.Cell {
+func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
 	aliveCells := []util.Cell{}
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
@@ -117,32 +135,81 @@ func calculateAliveCells(p Params, world [][]byte) []util.Cell {
 	return aliveCells
 }
 
-func worker(startY, endY int, world [][] byte, sliceOfChi chan<- [][]uint8, p Params) {
-	var worldGo [][] byte
+// func worker(startY, endY int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params) {
+// 	var worldGo [][]uint8
+// 	var newData [][]uint8
 
-	if startY == 0 {
-		newData := world[p.ImageHeight]
-		worldGo := world[startY: endY + 1]
+// 	if startY == 0 {
+// 		newData = append(newData, world[p.ImageHeight-1])
+// 		fmt.Println("hello:", endY)
+// 		worldGo = world[:endY]
+// 		worldGo = append(newData, worldGo...)
+// 		fmt.Println("start index:", len(worldGo)-2)
+// 		//fmt.Println(worldGo)
+
+// 	} else if endY == p.ImageHeight {
+// 		worldGo = world[startY-1:]
+// 		worldGo = append(worldGo, worldGo[0])
+// 		fmt.Println("end index:", len(worldGo)-2)
+
+// 	} else {
+// 		worldGo = world[startY-1 : endY+1]
+// 		fmt.Println("else index:", len(worldGo)-2)
+
+// 	}
+
+// 	filter := calculateNextState(p, worldGo)
+// 	sliceOfChi <- filter
+// }
+
+func worker(lines []int, thread int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params) {
+	var worldGo [][]uint8
+	var newData [][]uint8
+
+	compLines := 0
+
+	for i := 0; i < thread; i++ {
+		compLines = compLines + lines[i]
+	}
+
+	if thread == 0 {
+		newData = append(newData, world[p.ImageHeight-1])
+		if p.Threads == 1 {
+			worldGo = world
+		} else {
+			worldGo = world[:lines[thread]+1]
+		}
+
 		worldGo = append(newData, worldGo...)
-	} else if endY == p.ImageHeight {
-		worldGo := world[startY - 1: endY]
-		worldGo = append(worldGo, worldGo[0])
-	} else {
-		worldGo := world[startY - 1: endY + 1]
-	}  
+		//fmt.Println("start index:", len(worldGo)-2)
+		//fmt.Println(worldGo)
 
-	filter := calculateNextState(p,worldGo)
+	} else if thread == p.Threads-1 {
+		worldGo = world[compLines-1:]
+		worldGo = append(worldGo, world[0])
+		//fmt.Println("end index:", len(worldGo)-2)
+
+	} else {
+		worldGo = world[compLines-1 : compLines+lines[thread]+1]
+		//fmt.Println("else index:", len(worldGo)-2)
+
+	}
+
+	filter := calculateNextState(p, worldGo)
 	sliceOfChi <- filter
 }
-func calculateNextState(p Params, world [][]byte) [][]byte {
+
+func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 
 	var counter, nextX, lastX, nextY, lastY int //can I use a byte here instead
-	newWS := make([][]byte, p.ImageHeight)
+	newWS := make([][]uint8, len(world))
 	for i := 0; i < len(world); i++ {
-		newWS[i] = make([]byte, p.ImageWidth)
+		newWS[i] = make([]uint8, p.ImageWidth)
 	}
 
 	//fmt.Println(newWS)
+
+	//for y, s := range world
 
 	for y, s := range world {
 
@@ -203,9 +270,7 @@ func calculateNextState(p Params, world [][]byte) [][]byte {
 
 			//Live cells
 			if sl == 255 {
-				if counter < 2 { //"any live cell with fewer than two live neighbours dies"
-					newWS[y][x] = 0
-				} else if counter > 3 { //"any live cell with more than three live neighbours dies"
+				if counter < 2 || counter > 3 { //"any live cell with fewer than two or more than three live neighbours dies"
 					newWS[y][x] = 0
 				} else { //"any live cell with two or three live neighbours is unaffected"
 					newWS[y][x] = 255
@@ -226,7 +291,10 @@ func calculateNextState(p Params, world [][]byte) [][]byte {
 		}
 
 	}
-	world = newWS
+	//world = newWS
+	//fmt.Println("height:", p.ImageHeight)
+	//fmt.Println("threads:", p.Threads)
+	//fmt.Println("index:", len(newWS)-2)
 
-	return world
+	return newWS[1 : len(newWS)-2]
 }
