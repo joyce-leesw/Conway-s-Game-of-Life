@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
 )
@@ -16,15 +17,15 @@ type distributorChannels struct {
 	inputQ   <-chan uint8
 }
 
-/*type cell struct {
-	X, Y int
-}*/
-
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
 	// TODO: Create a 2D slice to store the world.
 	turn := 0
+
+	ticker := time.NewTicker(2 * time.Second)
+	done := make(chan bool)
+	doneDone := make(chan bool)
 
 	initialWorld := make([][]uint8, p.ImageHeight)
 	for i := 0; i < (p.ImageHeight); i++ {
@@ -35,7 +36,7 @@ func distributor(p Params, c distributorChannels) {
 	fileName := fmt.Sprintf("%vx%v", p.ImageWidth, p.ImageHeight)
 
 	//read the game of life and convert the pgm into a slice of slices
-	//initialWorld := readPgmImage(p, fileName)
+	//initialWorld := readPgmImage(p, fileName
 	c.ioCommand <- ioInput
 	c.filename <- fileName
 
@@ -57,6 +58,24 @@ func distributor(p Params, c distributorChannels) {
 	sliceOfCh := make([]chan [][]uint8, p.Threads)
 
 	world := initialWorld
+	//c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
+
+	go func() {
+		//timer := time.After(2 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				select {
+				case <-doneDone:
+					c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
+				}
+			case <-done:
+				return
+
+			}
+		}
+	}()
+
 	for turnf := 0; turnf < p.Turns; turnf++ {
 
 		// world = calculateNextState(p, world)
@@ -96,12 +115,16 @@ func distributor(p Params, c distributorChannels) {
 			newData = append(newData, slice...)
 		}
 		//fmt.Println(newData)
+
+		//doneDone <- false
 		world = newData
+		turn++
+		doneDone <- true
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
 		}
-		c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
+		//c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
 		c.events <- TurnComplete{turnf}
 		c.events <- StateChange{turnf, state}
 	}
@@ -111,6 +134,10 @@ func distributor(p Params, c distributorChannels) {
 	turn = p.Turns
 
 	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
+
+	ticker.Stop()
+	done <- true
+
 	c.ioCommand <- ioOutput
 	c.filename <- fileName
 
