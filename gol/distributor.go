@@ -84,11 +84,19 @@ func distributor(p Params, c distributorChannels) {
 		}
 
 		var newData [][]uint8
+
+		// newData := make([][]uint8, p.ImageHeight)
+		// for i := 0; i < (p.ImageHeight); i++ {
+		// 	initialWorld[i] = make([]uint8, p.ImageWidth)
+		//
+
 		for i := 0; i < p.Threads; i++ {
 			slice := <-sliceOfCh[i]
+			//fmt.Println(len(slice))
 			newData = append(newData, slice...)
 		}
-		//world = newData
+		//fmt.Println(newData)
+		world = newData
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
@@ -194,8 +202,16 @@ func worker(lines []int, thread int, world [][]uint8, sliceOfChi chan<- [][]uint
 		//fmt.Println("else index:", len(worldGo)-2)
 
 	}
+	var filter [][]uint8
 
-	filter := calculateNextState(p, worldGo)
+	if p.Threads == 1 {
+		filter = calculateNextState(p, world)
+
+	} else {
+		filter = calculateNextState(p, worldGo)
+
+	}
+
 	sliceOfChi <- filter
 }
 
@@ -296,5 +312,12 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 	//fmt.Println("threads:", p.Threads)
 	//fmt.Println("index:", len(newWS)-2)
 
-	return newWS[1 : len(newWS)-2]
+	if p.Threads == 1 {
+
+		return newWS
+
+	}
+
+	return newWS[1 : len(newWS)-1]
+
 }
