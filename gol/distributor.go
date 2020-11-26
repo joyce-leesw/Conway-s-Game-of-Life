@@ -2,6 +2,7 @@ package gol
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
@@ -25,7 +26,8 @@ func distributor(p Params, c distributorChannels) {
 
 	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan bool)
-	doneDone := make(chan bool)
+	//doneDone := make(chan bool)
+	var mutex = &sync.Mutex{}
 
 	initialWorld := make([][]uint8, p.ImageHeight)
 	for i := 0; i < (p.ImageHeight); i++ {
@@ -65,10 +67,10 @@ func distributor(p Params, c distributorChannels) {
 		for {
 			select {
 			case <-ticker.C:
-				select {
-				case <-doneDone:
-					c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
-				}
+				mutex.Lock()
+				c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
+				mutex.Unlock()
+
 			case <-done:
 				return
 
@@ -117,14 +119,18 @@ func distributor(p Params, c distributorChannels) {
 		//fmt.Println(newData)
 
 		//doneDone <- false
+		mutex.Lock()
 		world = newData
 		turn++
-		doneDone <- true
+		//doneDone <- true
+		mutex.Unlock()
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
 		}
+
 		//c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
+		state = 1
 		c.events <- TurnComplete{turnf}
 		c.events <- StateChange{turnf, state}
 	}
@@ -138,8 +144,11 @@ func distributor(p Params, c distributorChannels) {
 	ticker.Stop()
 	done <- true
 
+	// output state of game as PGM after all turns completed
+	outName := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, p.Turns)
+
 	c.ioCommand <- ioOutput
-	c.filename <- fileName
+	c.filename <- outName
 
 	for i := 0; i < (p.ImageHeight); i++ {
 		for j := 0; j < (p.ImageHeight); j++ {
