@@ -14,7 +14,7 @@ type distributorChannels struct {
 	ioIdle    <-chan bool
 
 	filename chan<- string
-	outputQ  chan<- uint8 // this was diffrent before outputQ    chan<- uint8
+	outputQ  chan<- uint8
 	inputQ   <-chan uint8
 }
 
@@ -25,15 +25,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	go controller(keyPresses, controllerFlag)
 
 	// TODO: Create a 2D slice to store the world.
-	//turn := 0
-	var turn int
+	var turn int // undecalered value is zero
 
-	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan bool)
-	//doneDone := make(chan bool)
+	ticker := time.NewTicker(2 * time.Second) // create a ticker for our alivecellscount event anon func
+	done := make(chan bool)                   // so we can end the anon go function for allivecellscount
 	var mutex = &sync.Mutex{}
 
-	initialWorld := make([][]uint8, p.ImageHeight)
+	initialWorld := make([][]uint8, p.ImageHeight) //make empty board heightxwidth
 	for i := 0; i < (p.ImageHeight); i++ {
 		initialWorld[i] = make([]uint8, p.ImageWidth)
 	}
@@ -42,18 +40,16 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	fileName := fmt.Sprintf("%vx%v", p.ImageWidth, p.ImageHeight)
 
 	//read the game of life and convert the pgm into a slice of slices
-	//initialWorld := readPgmImage(p, fileName
 	c.ioCommand <- ioInput
 	c.filename <- fileName
 
-	for i := 0; i < (p.ImageHeight); i++ {
+	for i := 0; i < (p.ImageHeight); i++ { //take the bytes we get from the inputQ channel and populate the empty board
 		for j := 0; j < (p.ImageHeight); j++ {
 			initialWorld[i][j] = <-c.inputQ
 		}
 	}
 
 	// TODO: For all initially alive cells send a CellFlipped Event.
-	//calculateAliveCells(p, initialWorld)
 	for _, cellQ := range calculateAliveCells(p, initialWorld) {
 		c.events <- CellFlipped{0, cellQ}
 	}
@@ -61,17 +57,15 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	// TODO: Execute all turns of the Game of Life.
 	var state State
 
-	sliceOfCh := make([]chan [][]uint8, p.Threads)
+	sliceOfCh := make([]chan [][]uint8, p.Threads) // make a separate channel for each divided piece of the game board
 
 	world := initialWorld
-	//c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
 
-	go func() {
-		//timer := time.After(2 * time.Second)
+	go func() { //anon function that reports alivecellcount every two seconds
 		for {
 			select {
 			case <-ticker.C:
-				mutex.Lock()
+				mutex.Lock() //mutex as this cant happen at the same times lines as lines 107-108
 				c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
 				mutex.Unlock()
 
@@ -84,11 +78,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 	for turnf := 0; turnf < p.Turns; turnf++ {
 
-		// world = calculateNextState(p, world)
-
 		baseLines := p.ImageHeight / p.Threads
 		slackLines := p.ImageHeight % p.Threads // remainder
-		//var workLines [p.Threads]int
 		workLines := make([]int, p.Threads)
 
 		for i := 0; i < p.Threads; i++ { // create an array with the minimum amount of lines to work on
@@ -99,70 +90,27 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			workLines[i]++
 		}
 
-		//fmt.Println(workLines)
-
-		for i := 0; i < p.Threads; i++ {
+		for i := 0; i < p.Threads; i++ { //call a worker for each section we are splitting the board into
 			sliceOfCh[i] = make(chan [][]uint8)
 
-			//go worker(i*p.ImageHeight/p.Threads, (i+1)*p.ImageHeight/p.Threads, world, sliceOfCh[i], p)
 			go worker(workLines, i, world, sliceOfCh[i], p, c, turnf)
 		}
 
 		var newData [][]uint8
 
-		// newData := make([][]uint8, p.ImageHeight)
-		// for i := 0; i < (p.ImageHeight); i++ {
-		// 	initialWorld[i] = make([]uint8, p.ImageWidth)
-		//
-
-		for i := 0; i < p.Threads; i++ {
+		for i := 0; i < p.Threads; i++ { // take our updated parts and put them back togther
 			slice := <-sliceOfCh[i]
-			//fmt.Println(len(slice))
 			newData = append(newData, slice...)
 		}
-		//fmt.Println(newData)
 
-		// var oldCells []util.Cell //--------------------------------------------------------------
-		// oldCells = calculateAliveCells(p, world)
-
-		//doneDone <- false
 		mutex.Lock()
-		world = newData
-		turn++
-		//doneDone <- true
+		world = newData //update the board state
+		turn++          //increment the turn counter
+
 		mutex.Unlock()
 
-		//for every cell not in calculateAliveCells(p, world) but is in old cells
-		//send a cell flipped event
-
-		// var newlyDeadCells []util.Cell // not mgs
-
-		// for _, i := range oldCells {
-		// 	flagDead := false
-		// 	for _, j := range calculateAliveCells(p, world) {
-		// 		if i == j {
-		// 			//newlyDeadCells = append(newlyDeadCells, i)
-		// 			flagDead = true
-
-		// 		}
-		// 	}
-		// 	if flagDead == false {
-		// 		newlyDeadCells = append(newlyDeadCells, i)
-		// 	}
-		// }
-		// // newlydeadcells= oldcells- newlydeadcelss
-
-		// for _, cellQ := range oldCells {
-		// 	c.events <- CellFlipped{turnf, cellQ}
-		// }
-
-		// for _, cellQ := range calculateAliveCells(p, world) {
-		// 	c.events <- CellFlipped{turnf, cellQ}
-		// }
-
-		//c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
-		state = 1
-		c.events <- TurnComplete{turnf}
+		state = 1                      //set the state to exectuing
+		c.events <- TurnComplete{turn} //send turn complete event
 
 		//fmt.Println(<-keyPresses)
 		var keyFlag int
@@ -171,19 +119,20 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 		if keyFlag == 2 { // when q is pressed, quit turn
 			state = 2
-			c.events <- StateChange{turnf, state}
+			c.events <- StateChange{turn, state}
 			<-controllerFlag // remove 4 from the buffer
 			break
 		}
 		if keyFlag == 0 { // when p is pressed, pause turn
 			state = 0
 			<-controllerFlag
-			c.events <- StateChange{turnf, state}
+			c.events <- StateChange{turn, state}
 			for {
 				keyFlag = <-controllerFlag
 				if keyFlag == 0 { // when p is pressed again, resume
 					state = 1
-					c.events <- StateChange{turnf, state}
+					fmt.Println("Continuing")
+					c.events <- StateChange{turn, state}
 					break
 				}
 			}
@@ -203,17 +152,16 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			<-controllerFlag
 
 		}
-		//c.events <- StateChange{turnf, state}
+		//c.events <- StateChange{turnf, state}--------------------------------------------------------------remove this line
 	}
 
 	// TODO: Send correct Events when required, e.g. CellFlipped, TurnComplete and FinalTurnComplete.
 	//		 See event.go for a list of all events.
-	//turn = p.Turns
 
 	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
 
-	ticker.Stop()
-	done <- true
+	ticker.Stop() //stop ticker
+	done <- true  // send fl;ag to finish anon go routine for alivecellscount
 
 	// output state of game as PGM after all turns completed
 	outName := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turn)
@@ -250,33 +198,6 @@ func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
 	return aliveCells
 }
 
-// func worker(startY, endY int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params) {
-// 	var worldGo [][]uint8
-// 	var newData [][]uint8
-
-// 	if startY == 0 {
-// 		newData = append(newData, world[p.ImageHeight-1])
-// 		fmt.Println("hello:", endY)
-// 		worldGo = world[:endY]
-// 		worldGo = append(newData, worldGo...)
-// 		fmt.Println("start index:", len(worldGo)-2)
-// 		//fmt.Println(worldGo)
-
-// 	} else if endY == p.ImageHeight {
-// 		worldGo = world[startY-1:]
-// 		worldGo = append(worldGo, worldGo[0])
-// 		fmt.Println("end index:", len(worldGo)-2)
-
-// 	} else {
-// 		worldGo = world[startY-1 : endY+1]
-// 		fmt.Println("else index:", len(worldGo)-2)
-
-// 	}
-
-// 	filter := calculateNextState(p, worldGo)
-// 	sliceOfChi <- filter
-// }
-
 func worker(lines []int, sliceNum int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params, c distributorChannels, turnf int) {
 	var worldGo [][]uint8
 	var newData [][]uint8
@@ -304,7 +225,6 @@ func worker(lines []int, sliceNum int, world [][]uint8, sliceOfChi chan<- [][]ui
 	} else { //is this the last slice of the GOL board
 		worldGo = world[compLines-1 : compLines+lines[sliceNum]+1]
 	}
-	//var part [][]uint8
 
 	part := calculateNextState(p, worldGo, c, turnf, compLines)
 
@@ -339,18 +259,7 @@ func calculateNextState(p Params, world [][]uint8, c distributorChannels, turnf 
 				lastX = x - 1
 			}
 
-			// //Set the nextY and lastY variables
-			// if y == len(world)-1 { //are we looking at the last element of the slice
-			// 	nextY = 0
-			// 	lastY = y - 1
-			// } else if y == 0 { //are we looking at the first element of the slice
-			// 	nextY = y + 1
-			// 	lastY = len(world) - 1
-			// } else { //we are looking at any element that is not the first of last element of a slice
-			// 	nextY = y + 1
-			// 	lastY = y - 1
-			// }
-
+			//Set the nextY and lastY variables
 			nextY = y + 2
 			lastY = y
 
@@ -408,17 +317,6 @@ func calculateNextState(p Params, world [][]uint8, c distributorChannels, turnf 
 		}
 
 	}
-	//world = newWS
-	//fmt.Println("height:", p.ImageHeight)
-	//fmt.Println("threads:", p.Threads)
-	//fmt.Println("index:", len(newWS)-2)
-
-	if p.Threads == 1 {
-
-		return newWS
-
-	}
-	//fmt.Println(newWS)
 
 	return newWS
 
