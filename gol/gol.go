@@ -26,7 +26,7 @@ func Run(p Params, events chan<- Event, keyPresses <-chan rune) {
 		outputQ,
 		inputQ,
 	}
-	go distributor(p, distributorChannels)
+	go distributor(p, distributorChannels, keyPresses)
 
 	ioChannels := ioChannels{
 		command: ioCommand,

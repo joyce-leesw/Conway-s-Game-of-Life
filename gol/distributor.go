@@ -19,10 +19,14 @@ type distributorChannels struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
+
+	controllerFlag := make(chan int, 2)
+	go controller(keyPresses, controllerFlag)
 
 	// TODO: Create a 2D slice to store the world.
-	turn := 0
+	//turn := 0
+	var turn int
 
 	ticker := time.NewTicker(2 * time.Second)
 	done := make(chan bool)
@@ -118,12 +122,39 @@ func distributor(p Params, c distributorChannels) {
 		}
 		//fmt.Println(newData)
 
+		var oldCells []util.Cell
+		oldCells = calculateAliveCells(p, world)
+
 		//doneDone <- false
 		mutex.Lock()
 		world = newData
 		turn++
 		//doneDone <- true
 		mutex.Unlock()
+
+		//for every cell not in calculateAliveCells(p, world) but is in old cells
+		//send a cell flipped event
+
+		// var newlyDeadCells []util.Cell // not mgs
+
+		// for _, i := range oldCells {
+		// 	flagDead := false
+		// 	for _, j := range calculateAliveCells(p, world) {
+		// 		if i == j {
+		// 			//newlyDeadCells = append(newlyDeadCells, i)
+		// 			flagDead = true
+
+		// 		}
+		// 	}
+		// 	if flagDead == false {
+		// 		newlyDeadCells = append(newlyDeadCells, i)
+		// 	}
+		// }
+		// // newlydeadcells= oldcells- newlydeadcelss
+
+		for _, cellQ := range oldCells {
+			c.events <- CellFlipped{turnf, cellQ}
+		}
 
 		for _, cellQ := range calculateAliveCells(p, world) {
 			c.events <- CellFlipped{turnf, cellQ}
@@ -132,12 +163,52 @@ func distributor(p Params, c distributorChannels) {
 		//c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
 		state = 1
 		c.events <- TurnComplete{turnf}
-		c.events <- StateChange{turnf, state}
+
+		//fmt.Println(<-keyPresses)
+		var keyFlag int
+		controllerFlag <- 4
+		keyFlag = <-controllerFlag
+
+		if keyFlag == 2 { // when q is pressed, quit turn
+			state = 2
+			c.events <- StateChange{turnf, state}
+			<-controllerFlag // remove 4 from the buffer
+			break
+		}
+		if keyFlag == 0 { // when p is pressed, pause turn
+			state = 0
+			<-controllerFlag
+			c.events <- StateChange{turnf, state}
+			for {
+				keyFlag = <-controllerFlag
+				if keyFlag == 0 { // when p is pressed again, resume
+					state = 1
+					c.events <- StateChange{turnf, state}
+					break
+				}
+			}
+		}
+		if keyFlag == 1 { // when s is pressed, print current turn
+			outName := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turn)
+
+			c.ioCommand <- ioOutput
+			c.filename <- outName
+
+			for i := 0; i < (p.ImageHeight); i++ {
+				for j := 0; j < (p.ImageHeight); j++ {
+					c.outputQ <- world[i][j]
+				}
+			}
+			c.events <- ImageOutputComplete{turn, outName}
+			<-controllerFlag
+
+		}
+		//c.events <- StateChange{turnf, state}
 	}
 
 	// TODO: Send correct Events when required, e.g. CellFlipped, TurnComplete and FinalTurnComplete.
 	//		 See event.go for a list of all events.
-	turn = p.Turns
+	//turn = p.Turns
 
 	c.events <- FinalTurnComplete{turn, calculateAliveCells(p, world)}
 
@@ -145,7 +216,7 @@ func distributor(p Params, c distributorChannels) {
 	done <- true
 
 	// output state of game as PGM after all turns completed
-	outName := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, p.Turns)
+	outName := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turn)
 
 	c.ioCommand <- ioOutput
 	c.filename <- outName
@@ -156,7 +227,7 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	c.events <- ImageOutputComplete{turn, fileName}
+	c.events <- ImageOutputComplete{turn, outName}
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -355,5 +426,22 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 	}
 
 	return newWS[1 : len(newWS)-1]
+
+}
+
+func controller(keyPresses <-chan rune, controllerFlag chan<- int) {
+	for {
+		keypressed := <-keyPresses
+		switch {
+		case keypressed == 113: // when q is pressed
+			controllerFlag <- 2
+		case keypressed == 112: // when p is pressed
+			controllerFlag <- 0
+		case keypressed == 115: // when s is pressed
+			controllerFlag <- 1
+
+		}
+
+	}
 
 }
