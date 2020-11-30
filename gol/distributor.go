@@ -105,7 +105,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			sliceOfCh[i] = make(chan [][]uint8)
 
 			//go worker(i*p.ImageHeight/p.Threads, (i+1)*p.ImageHeight/p.Threads, world, sliceOfCh[i], p)
-			go worker(workLines, i, world, sliceOfCh[i], p)
+			go worker(workLines, i, world, sliceOfCh[i], p, c, turnf)
 		}
 
 		var newData [][]uint8
@@ -122,8 +122,8 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		}
 		//fmt.Println(newData)
 
-		var oldCells []util.Cell
-		oldCells = calculateAliveCells(p, world)
+		// var oldCells []util.Cell //--------------------------------------------------------------
+		// oldCells = calculateAliveCells(p, world)
 
 		//doneDone <- false
 		mutex.Lock()
@@ -152,13 +152,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 		// }
 		// // newlydeadcells= oldcells- newlydeadcelss
 
-		for _, cellQ := range oldCells {
-			c.events <- CellFlipped{turnf, cellQ}
-		}
+		// for _, cellQ := range oldCells {
+		// 	c.events <- CellFlipped{turnf, cellQ}
+		// }
 
-		for _, cellQ := range calculateAliveCells(p, world) {
-			c.events <- CellFlipped{turnf, cellQ}
-		}
+		// for _, cellQ := range calculateAliveCells(p, world) {
+		// 	c.events <- CellFlipped{turnf, cellQ}
+		// }
 
 		//c.events <- AliveCellsCount{turnf, len(calculateAliveCells(p, world))}
 		state = 1
@@ -277,64 +277,51 @@ func calculateAliveCells(p Params, world [][]uint8) []util.Cell {
 // 	sliceOfChi <- filter
 // }
 
-func worker(lines []int, thread int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params) {
+func worker(lines []int, sliceNum int, world [][]uint8, sliceOfChi chan<- [][]uint8, p Params, c distributorChannels, turnf int) {
 	var worldGo [][]uint8
 	var newData [][]uint8
 
 	compLines := 0
 
-	for i := 0; i < thread; i++ {
+	for i := 0; i < sliceNum; i++ {
 		compLines = compLines + lines[i]
 	}
 
-	if thread == 0 {
-		newData = append(newData, world[p.ImageHeight-1])
-		if p.Threads == 1 {
+	if sliceNum == 0 { // is this the first slice of the GOL board
+		newData = append(newData, world[p.ImageHeight-1]) // add last line to start
+		if p.Threads == 1 {                               //is this the only slice
 			worldGo = world
+			worldGo = append(worldGo, world[0]) // add first line to the end if we have 1 worker
 		} else {
-			worldGo = world[:lines[thread]+1]
+			worldGo = world[:lines[sliceNum]+1]
 		}
 
 		worldGo = append(newData, worldGo...)
-		//fmt.Println("start index:", len(worldGo)-2)
-		//fmt.Println(worldGo)
 
-	} else if thread == p.Threads-1 {
+	} else if sliceNum == p.Threads-1 { //is this neither the first or last slice of the GOL board
 		worldGo = world[compLines-1:]
 		worldGo = append(worldGo, world[0])
-		//fmt.Println("end index:", len(worldGo)-2)
-
-	} else {
-		worldGo = world[compLines-1 : compLines+lines[thread]+1]
-		//fmt.Println("else index:", len(worldGo)-2)
-
+	} else { //is this the last slice of the GOL board
+		worldGo = world[compLines-1 : compLines+lines[sliceNum]+1]
 	}
-	var filter [][]uint8
+	//var part [][]uint8
 
-	if p.Threads == 1 {
-		filter = calculateNextState(p, world)
+	part := calculateNextState(p, worldGo, c, turnf, compLines)
 
-	} else {
-		filter = calculateNextState(p, worldGo)
-
-	}
-
-	sliceOfChi <- filter
+	sliceOfChi <- part
 }
 
-func calculateNextState(p Params, world [][]uint8) [][]uint8 {
+func calculateNextState(p Params, world [][]uint8, c distributorChannels, turnf int, compLines int) [][]uint8 {
 
 	var counter, nextX, lastX, nextY, lastY int //can I use a byte here instead
-	newWS := make([][]uint8, len(world))
-	for i := 0; i < len(world); i++ {
+	newWS := make([][]uint8, (len(world) - 2))
+	for i := 0; i < (len(world) - 2); i++ {
 		newWS[i] = make([]uint8, p.ImageWidth)
 	}
 
-	//fmt.Println(newWS)
+	tempW := world[1 : len(world)-1]
 
-	//for y, s := range world
-
-	for y, s := range world {
+	for y, s := range tempW {
 
 		for x, sl := range s {
 
@@ -352,17 +339,20 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 				lastX = x - 1
 			}
 
-			//Set the nextY and lastY variables
-			if y == len(world)-1 { //are we looking at the last element of the slice
-				nextY = 0
-				lastY = y - 1
-			} else if y == 0 { //are we looking at the first element of the slice
-				nextY = y + 1
-				lastY = len(world) - 1
-			} else { //we are looking at any element that is not the first of last element of a slice
-				nextY = y + 1
-				lastY = y - 1
-			}
+			// //Set the nextY and lastY variables
+			// if y == len(world)-1 { //are we looking at the last element of the slice
+			// 	nextY = 0
+			// 	lastY = y - 1
+			// } else if y == 0 { //are we looking at the first element of the slice
+			// 	nextY = y + 1
+			// 	lastY = len(world) - 1
+			// } else { //we are looking at any element that is not the first of last element of a slice
+			// 	nextY = y + 1
+			// 	lastY = y - 1
+			// }
+
+			nextY = y + 2
+			lastY = y
 
 			if 255 == s[nextX] {
 				counter++
@@ -395,6 +385,8 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 			if sl == 255 {
 				if counter < 2 || counter > 3 { //"any live cell with fewer than two or more than three live neighbours dies"
 					newWS[y][x] = 0
+					c.events <- CellFlipped{turnf, util.Cell{X: x, Y: (y + compLines)}}
+
 				} else { //"any live cell with two or three live neighbours is unaffected"
 					newWS[y][x] = 255
 				}
@@ -405,6 +397,8 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 			if sl == 0 {
 				if counter == 3 { //"any dead cell with exactly three live neighbours becomes alive"
 					newWS[y][x] = 255
+					c.events <- CellFlipped{turnf, util.Cell{X: x, Y: (y + compLines)}}
+
 				} else {
 					newWS[y][x] = 0 // Dead cells elsewise stay dead
 				}
@@ -424,8 +418,9 @@ func calculateNextState(p Params, world [][]uint8) [][]uint8 {
 		return newWS
 
 	}
+	//fmt.Println(newWS)
 
-	return newWS[1 : len(newWS)-1]
+	return newWS
 
 }
 
