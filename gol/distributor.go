@@ -109,7 +109,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 		mutex.Unlock()
 
-		state = 1                      //set the state to exectuing
+		state = 1                      //set the state to executing
 		c.events <- TurnComplete{turn} //send turn complete event
 
 		//fmt.Println(<-keyPresses)
