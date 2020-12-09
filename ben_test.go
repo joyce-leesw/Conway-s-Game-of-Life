@@ -19,11 +19,15 @@ func BenchmarkGol(b *testing.B) {
 
 	//var cells []util.Cell
 
-	for event := range events {
-		switch event.(type) {
-		case gol.FinalTurnComplete:
-			//cells = e.Alive
+	for {
+		event := <- events
+		_, ok := event.(gol.FinalTurnComplete)
+
+		if ok {
+		break
 		}
+
+
 	}
 	//cells = append(cells, util.Cell{0, 0})
 }
